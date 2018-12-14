@@ -51,7 +51,7 @@ func TestCallDepth(t *testing.T) {
 	b.Reset()
 	func() {
 		l := New(WriterOpt(b), FlagOpt(Lshortfile), BaseCallDepthOpt(1))
-		l.Println("d4")
+		l.Print("d4")
 	}()
 	if !strings.Contains(b.String(), "55: d4") {
 		t.Fatal("calldepth not match: ", b.String())

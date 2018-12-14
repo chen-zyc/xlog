@@ -1,6 +1,9 @@
 package xlog
 
-import "io"
+import (
+	"io"
+	"os"
+)
 
 // 输出格式
 const (
@@ -17,42 +20,35 @@ const (
 type Logger interface {
 	SetOptions(opts ...Option)
 
-	// Output writes the output for a logging event. The string s contains
-	// the text to print after the prefix specified by the flags of the
-	// Logger. A newline is appended if the last character of s is not
-	// already a newline. Calldepth is used to recover the PC and is
-	// provided for generality, although at the moment on all pre-defined
-	// paths it will be 2.
-	Output(calldepth int, s string) error
+	Output(lvl Level, calldepth int, s string) error
 
-	// Print calls l.Output to print to the logger.
-	// Arguments are handled in the manner of fmt.Print.
+	// Print 不受 Level 的影响，不管 Level 是什么总是能够打印出日志
 	Print(v ...interface{})
-
-	// Printf calls l.Output to print to the logger.
-	// Arguments are handled in the manner of fmt.Printf.
 	Printf(format string, v ...interface{})
-
-	// Println calls l.Output to print to the logger.
-	// Arguments are handled in the manner of fmt.Println.
 	Println(v ...interface{})
 
-	// Fatal is equivalent to l.Print() followed by a call to os.Exit(1).
+	Debug(v ...interface{})
+	Debugf(format string, v ...interface{})
+	Debugln(v ...interface{})
+
+	Info(v ...interface{})
+	Infof(format string, v ...interface{})
+	Infoln(v ...interface{})
+
+	Warn(v ...interface{})
+	Warnf(format string, v ...interface{})
+	Warnln(v ...interface{})
+
+	Error(v ...interface{})
+	Errorf(format string, v ...interface{})
+	Errorln(v ...interface{})
+
 	Fatal(v ...interface{})
-
-	// Fatalf is equivalent to l.Printf() followed by a call to os.Exit(1).
 	Fatalf(format string, v ...interface{})
-
-	// Fatalln is equivalent to l.Println() followed by a call to os.Exit(1).
 	Fatalln(v ...interface{})
 
-	// Panic is equivalent to l.Print() followed by a call to panic().
 	Panic(v ...interface{})
-
-	// Panicf is equivalent to l.Printf() followed by a call to panic().
 	Panicf(format string, v ...interface{})
-
-	// Panicln is equivalent to l.Println() followed by a call to panic().
 	Panicln(v ...interface{})
 }
 
@@ -95,9 +91,19 @@ func BaseCallDepthOpt(depth int) Option {
 	}
 }
 
+// LevelOpt 设置等级。
+func LevelOpt(lvl Level) Option {
+	return func(l *logger) {
+		l.level = lvl
+	}
+}
+
 // New 根据 opts 指定的参数返回 Logger 的一个实现。
 func New(opts ...Option) Logger {
 	l := &logger{}
 	l.SetOptions(opts...)
+	if l.out == nil {
+		l.out = os.Stderr
+	}
 	return l
 }
