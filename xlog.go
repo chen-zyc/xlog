@@ -60,8 +60,8 @@ type Option func(v interface{})
 func WriterOpt(w io.Writer) Option {
 	return func(v interface{}) {
 		if l, ok := v.(*logger); ok {
-			l.crwm.Lock()
-			defer l.crwm.Unlock()
+			l.rwm.Lock()
+			defer l.rwm.Unlock()
 			l.out = w
 		}
 	}
@@ -71,8 +71,8 @@ func WriterOpt(w io.Writer) Option {
 func PrefixOpt(p string) Option {
 	return func(v interface{}) {
 		if l, ok := v.(*logger); ok {
-			l.crwm.Lock()
-			defer l.crwm.Unlock()
+			l.rwm.Lock()
+			defer l.rwm.Unlock()
 			l.prefix = p
 		}
 	}
@@ -82,8 +82,8 @@ func PrefixOpt(p string) Option {
 func FlagOpt(flag int) Option {
 	return func(v interface{}) {
 		if l, ok := v.(*logger); ok {
-			l.crwm.Lock()
-			defer l.crwm.Unlock()
+			l.rwm.Lock()
+			defer l.rwm.Unlock()
 			l.flag = flag
 		}
 	}
@@ -93,8 +93,8 @@ func FlagOpt(flag int) Option {
 func BaseCallDepthOpt(depth int) Option {
 	return func(v interface{}) {
 		if l, ok := v.(*logger); ok {
-			l.crwm.Lock()
-			defer l.crwm.Unlock()
+			l.rwm.Lock()
+			defer l.rwm.Unlock()
 			l.baseCallDepth = depth
 		}
 	}
@@ -104,9 +104,20 @@ func BaseCallDepthOpt(depth int) Option {
 func LevelOpt(lvl Level) Option {
 	return func(v interface{}) {
 		if l, ok := v.(*logger); ok {
-			l.crwm.Lock()
-			defer l.crwm.Unlock()
+			l.rwm.Lock()
+			defer l.rwm.Unlock()
 			l.level = lvl
+		}
+	}
+}
+
+// ForceColorsOpt 设置是否开启颜色输出。
+func ForceColorsOpt(force bool) Option {
+	return func(v interface{}) {
+		if l, ok := v.(*logger); ok {
+			l.rwm.Lock()
+			defer l.rwm.Unlock()
+			l.forceColors = force
 		}
 	}
 }

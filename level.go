@@ -47,19 +47,40 @@ func (level Level) LogStr() string {
 	case PrintLevel:
 		return ""
 	case DebugLevel:
-		return "DEBU"
+		return "[DEBU]"
 	case InfoLevel:
-		return "INFO"
+		return "[INFO]"
 	case WarnLevel:
-		return "WARN"
+		return "[WARN]"
 	case ErrorLevel:
-		return "ERRO"
+		return "[ERRO]"
 	case FatalLevel:
-		return "FATA"
+		return "[FATA]"
 	case PanicLevel:
-		return "PANI"
+		return "[PANI]"
 	}
-	return "UNKN"
+	return "[UNKN]"
+}
+
+// Color 返回等级对应的颜色码。
+func (level Level) Color() string {
+	switch level {
+	case PrintLevel:
+		return ColorPrint
+	case DebugLevel:
+		return ColorDebug
+	case InfoLevel:
+		return ColorInfo
+	case WarnLevel:
+		return ColorWarn
+	case ErrorLevel:
+		return ColorError
+	case FatalLevel:
+		return ColorFatal
+	case PanicLevel:
+		return ColorPanic
+	}
+	return ColorPrint
 }
 
 // ParseLevel takes a string level and returns the Logrus log level constant.

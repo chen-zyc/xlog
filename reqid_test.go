@@ -16,9 +16,9 @@ func ExampleReqLogger() {
 	fmt.Println(b.String())
 
 	// Output:
-	// DEBU[testReqID]debug message
-	// INFO[testReqID]info message
-	// ERRO[testReqID]error message
+	// [DEBU][testReqID]debug message
+	// [INFO][testReqID]info message
+	// [ERRO][testReqID]error message
 }
 
 func TestReqIDGen(t *testing.T) {

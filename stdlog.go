@@ -9,16 +9,26 @@ import (
 	"time"
 )
 
+// 定义各级别的颜色
+var (
+	ColorPrint = "\x1b[0m"  // 无
+	ColorDebug = "\x1b[37m" // 灰
+	ColorInfo  = "\x1b[34m" // 蓝
+	ColorWarn  = "\x1b[33m" // 黄
+	ColorError = "\x1b[31m" // 红
+	ColorFatal = "\x1b[31m" // 红
+	ColorPanic = "\x1b[31m" // 红
+)
+
 // logger 是 Logger 接口的默认实现。
 type logger struct {
-	// TODO: 和 out 分开锁
-	wm            sync.Mutex // for out.
+	rwm           sync.RWMutex
 	out           io.Writer
-	crwm          sync.RWMutex // 配置锁
-	prefix        string       // prefix 写在每行前面
-	flag          int          // 比如 LstdFlags
-	baseCallDepth int          // 基础的深度，实际调用 Caller 的深度等于该值加上 Output 的 calldepth 值。
+	prefix        string // prefix 写在每行前面
+	flag          int    // 比如 LstdFlags
+	baseCallDepth int    // 基础的深度，实际调用 Caller 的深度等于该值加上 Output 的 calldepth 值。
 	level         Level
+	forceColors   bool // 强制输出颜色，默认是不输出。
 	buf           []byte
 }
 
@@ -34,8 +44,8 @@ func (l *logger) SetOptions(opts ...Option) {
 }
 
 func (l *logger) Level() Level {
-	l.crwm.RLock()
-	defer l.crwm.RUnlock()
+	l.rwm.RLock()
+	defer l.rwm.RUnlock()
 	return l.level
 }
 
@@ -46,23 +56,30 @@ func (l *logger) Output(lvl Level, calldepth int, reqID, s string) error {
 	var file string
 	var line int
 
-	l.crwm.Lock()
-	defer l.crwm.Unlock()
+	l.rwm.Lock()
+	defer l.rwm.Unlock()
 	if l.flag&(Lshortfile|Llongfile) != 0 {
 		calldepth += l.baseCallDepth
 		// Release lock while getting caller info - it's expensive.
-		l.crwm.Unlock()
+		l.rwm.Unlock()
 		var ok bool
 		_, file, line, ok = runtime.Caller(calldepth)
 		if !ok {
 			file = "???"
 			line = 0
 		}
-		l.crwm.Lock()
+		l.rwm.Lock()
 	}
 
 	l.buf = l.buf[:0]
+	// 颜色
+	if l.forceColors {
+		l.buf = append(l.buf, lvl.Color()...)
+	}
 	l.formatHeader(lvl, &l.buf, now, file, line, reqID)
+	if l.forceColors {
+		l.buf = append(l.buf, "\x1b[0m"...)
+	}
 	l.buf = append(l.buf, s...)
 	// 如果没有添加换行符则在最后添加换行符。
 	if len(s) == 0 || s[len(s)-1] != '\n' {
