@@ -11,24 +11,74 @@ import (
 
 // logger 是 Logger 接口的默认实现。
 type logger struct {
-	mu            sync.Mutex // for out.
+	// TODO: 和 out 分开锁
+	wm            sync.Mutex // for out.
 	out           io.Writer
-	prefix        string // prefix 写在每行前面
-	flag          int    // 比如 LstdFlags
-	baseCallDepth int    // 基础的深度，实际调用 Caller 的深度等于该值加上 Output 的 calldepth 值。
+	crwm          sync.RWMutex // 配置锁
+	prefix        string       // prefix 写在每行前面
+	flag          int          // 比如 LstdFlags
+	baseCallDepth int          // 基础的深度，实际调用 Caller 的深度等于该值加上 Output 的 calldepth 值。
 	level         Level
 	buf           []byte
 }
 
-// 默认 Logger.
+// 默认 Logger 实例.
 var defaultLogger = New(WriterOpt(os.Stderr), FlagOpt(LstdFlags), BaseCallDepthOpt(1))
+
+func (l *logger) SetOptions(opts ...Option) {
+	for _, opt := range opts {
+		if opt != nil {
+			opt(l)
+		}
+	}
+}
+
+func (l *logger) Level() Level {
+	l.crwm.RLock()
+	defer l.crwm.RUnlock()
+	return l.level
+}
+
+func (l *logger) Output(lvl Level, calldepth int, reqID, s string) error {
+	now := time.Now() // get this early.
+
+	// 获取打印日志的文件位置。
+	var file string
+	var line int
+
+	l.crwm.Lock()
+	defer l.crwm.Unlock()
+	if l.flag&(Lshortfile|Llongfile) != 0 {
+		calldepth += l.baseCallDepth
+		// Release lock while getting caller info - it's expensive.
+		l.crwm.Unlock()
+		var ok bool
+		_, file, line, ok = runtime.Caller(calldepth)
+		if !ok {
+			file = "???"
+			line = 0
+		}
+		l.crwm.Lock()
+	}
+
+	l.buf = l.buf[:0]
+	l.formatHeader(lvl, &l.buf, now, file, line, reqID)
+	l.buf = append(l.buf, s...)
+	// 如果没有添加换行符则在最后添加换行符。
+	if len(s) == 0 || s[len(s)-1] != '\n' {
+		l.buf = append(l.buf, '\n')
+	}
+	_, err := l.out.Write(l.buf)
+	return err
+}
 
 // formatHeader writes log header to buf in following order:
 //   * l.prefix (if it's not blank),
 //   * date and/or time (if corresponding flags are provided),
 //   * level
+//   * reqID
 //   * file and line number (if corresponding flags are provided).
-func (l *logger) formatHeader(lvl Level, buf *[]byte, t time.Time, file string, line int) {
+func (l *logger) formatHeader(lvl Level, buf *[]byte, t time.Time, file string, line int, reqID string) {
 	*buf = append(*buf, l.prefix...)
 	if l.flag&(Ldate|Ltime|Lmicroseconds) != 0 {
 		if l.flag&LUTC != 0 {
@@ -61,6 +111,13 @@ func (l *logger) formatHeader(lvl Level, buf *[]byte, t time.Time, file string, 
 	// log level
 	*buf = append(*buf, lvl.LogStr()...)
 
+	// request id
+	if reqID != "" {
+		*buf = append(*buf, '[')
+		*buf = append(*buf, reqID...)
+		*buf = append(*buf, ']')
+	}
+
 	if l.flag&(Lshortfile|Llongfile) != 0 {
 		if l.flag&Lshortfile != 0 {
 			short := file
@@ -79,115 +136,83 @@ func (l *logger) formatHeader(lvl Level, buf *[]byte, t time.Time, file string, 
 	}
 }
 
-func (l *logger) Output(lvl Level, calldepth int, s string) error {
-	now := time.Now() // get this early.
-
-	// 获取打印日志的文件位置。
-	var file string
-	var line int
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.flag&(Lshortfile|Llongfile) != 0 {
-		calldepth += l.baseCallDepth
-		// Release lock while getting caller info - it's expensive.
-		l.mu.Unlock()
-		var ok bool
-		_, file, line, ok = runtime.Caller(calldepth)
-		if !ok {
-			file = "???"
-			line = 0
-		}
-		l.mu.Lock()
-	}
-
-	l.buf = l.buf[:0]
-	l.formatHeader(lvl, &l.buf, now, file, line)
-	l.buf = append(l.buf, s...)
-	// 如果没有添加换行符则在最后添加换行符。
-	if len(s) == 0 || s[len(s)-1] != '\n' {
-		l.buf = append(l.buf, '\n')
-	}
-	_, err := l.out.Write(l.buf)
-	return err
-}
-
-func (l *logger) Print(v ...interface{}) { l.Output(PrintLevel, 2, fmt.Sprint(v...)) }
+func (l *logger) Print(v ...interface{}) { l.Output(PrintLevel, 2, "", fmt.Sprint(v...)) }
 
 func (l *logger) Printf(format string, v ...interface{}) {
-	l.Output(PrintLevel, 2, fmt.Sprintf(format, v...))
+	l.Output(PrintLevel, 2, "", fmt.Sprintf(format, v...))
 }
 
-func (l *logger) Println(v ...interface{}) { l.Output(PrintLevel, 2, fmt.Sprintln(v...)) }
+func (l *logger) Println(v ...interface{}) { l.Output(PrintLevel, 2, "", fmt.Sprintln(v...)) }
 
 func (l *logger) Debug(v ...interface{}) {
 	if l.level <= DebugLevel {
-		l.Output(DebugLevel, 2, fmt.Sprint(v...))
+		l.Output(DebugLevel, 2, "", fmt.Sprint(v...))
 	}
 }
 
 func (l *logger) Debugf(format string, v ...interface{}) {
 	if l.level <= DebugLevel {
-		l.Output(DebugLevel, 2, fmt.Sprintf(format, v...))
+		l.Output(DebugLevel, 2, "", fmt.Sprintf(format, v...))
 	}
 }
 
 func (l *logger) Debugln(v ...interface{}) {
 	if l.level <= DebugLevel {
-		l.Output(DebugLevel, 2, fmt.Sprintln(v...))
+		l.Output(DebugLevel, 2, "", fmt.Sprintln(v...))
 	}
 }
 
 func (l *logger) Info(v ...interface{}) {
 	if l.level <= InfoLevel {
-		l.Output(InfoLevel, 2, fmt.Sprint(v...))
+		l.Output(InfoLevel, 2, "", fmt.Sprint(v...))
 	}
 }
 
 func (l *logger) Infof(format string, v ...interface{}) {
 	if l.level <= InfoLevel {
-		l.Output(InfoLevel, 2, fmt.Sprintf(format, v...))
+		l.Output(InfoLevel, 2, "", fmt.Sprintf(format, v...))
 	}
 }
 
 func (l *logger) Infoln(v ...interface{}) {
 	if l.level <= InfoLevel {
-		l.Output(InfoLevel, 2, fmt.Sprintln(v...))
+		l.Output(InfoLevel, 2, "", fmt.Sprintln(v...))
 	}
 }
 
 func (l *logger) Warn(v ...interface{}) {
 	if l.level <= WarnLevel {
-		l.Output(WarnLevel, 2, fmt.Sprint(v...))
+		l.Output(WarnLevel, 2, "", fmt.Sprint(v...))
 	}
 }
 
 func (l *logger) Warnf(format string, v ...interface{}) {
 	if l.level <= WarnLevel {
-		l.Output(WarnLevel, 2, fmt.Sprintf(format, v...))
+		l.Output(WarnLevel, 2, "", fmt.Sprintf(format, v...))
 	}
 }
 
 func (l *logger) Warnln(v ...interface{}) {
 	if l.level <= WarnLevel {
-		l.Output(WarnLevel, 2, fmt.Sprintln(v...))
+		l.Output(WarnLevel, 2, "", fmt.Sprintln(v...))
 	}
 }
 
 func (l *logger) Error(v ...interface{}) {
 	if l.level <= ErrorLevel {
-		l.Output(ErrorLevel, 2, fmt.Sprint(v...))
+		l.Output(ErrorLevel, 2, "", fmt.Sprint(v...))
 	}
 }
 
 func (l *logger) Errorf(format string, v ...interface{}) {
 	if l.level <= ErrorLevel {
-		l.Output(ErrorLevel, 2, fmt.Sprintf(format, v...))
+		l.Output(ErrorLevel, 2, "", fmt.Sprintf(format, v...))
 	}
 }
 
 func (l *logger) Errorln(v ...interface{}) {
 	if l.level <= ErrorLevel {
-		l.Output(ErrorLevel, 2, fmt.Sprintln(v...))
+		l.Output(ErrorLevel, 2, "", fmt.Sprintln(v...))
 	}
 }
 
@@ -195,21 +220,21 @@ var osExit = os.Exit // for testing
 
 func (l *logger) Fatal(v ...interface{}) {
 	if l.level <= FatalLevel {
-		l.Output(FatalLevel, 2, fmt.Sprint(v...))
+		l.Output(FatalLevel, 2, "", fmt.Sprint(v...))
 		osExit(1)
 	}
 }
 
 func (l *logger) Fatalf(format string, v ...interface{}) {
 	if l.level <= FatalLevel {
-		l.Output(FatalLevel, 2, fmt.Sprintf(format, v...))
+		l.Output(FatalLevel, 2, "", fmt.Sprintf(format, v...))
 		osExit(1)
 	}
 }
 
 func (l *logger) Fatalln(v ...interface{}) {
 	if l.level <= FatalLevel {
-		l.Output(FatalLevel, 2, fmt.Sprintln(v...))
+		l.Output(FatalLevel, 2, "", fmt.Sprintln(v...))
 		osExit(1)
 	}
 }
@@ -217,7 +242,7 @@ func (l *logger) Fatalln(v ...interface{}) {
 func (l *logger) Panic(v ...interface{}) {
 	if l.level <= PanicLevel {
 		s := fmt.Sprint(v...)
-		l.Output(PanicLevel, 2, s)
+		l.Output(PanicLevel, 2, "", s)
 		panic(s)
 	}
 }
@@ -225,7 +250,7 @@ func (l *logger) Panic(v ...interface{}) {
 func (l *logger) Panicf(format string, v ...interface{}) {
 	if l.level <= PanicLevel {
 		s := fmt.Sprintf(format, v...)
-		l.Output(PanicLevel, 2, s)
+		l.Output(PanicLevel, 2, "", s)
 		panic(s)
 	}
 }
@@ -233,16 +258,8 @@ func (l *logger) Panicf(format string, v ...interface{}) {
 func (l *logger) Panicln(v ...interface{}) {
 	if l.level <= PanicLevel {
 		s := fmt.Sprintln(v...)
-		l.Output(PanicLevel, 2, s)
+		l.Output(PanicLevel, 2, "", s)
 		panic(s)
-	}
-}
-
-func (l *logger) SetOptions(opts ...Option) {
-	for _, opt := range opts {
-		if opt != nil {
-			opt(l)
-		}
 	}
 }
 
@@ -322,7 +339,9 @@ func Panicln(v ...interface{}) { defaultLogger.Panicln(v...) }
 // frames to skip when computing the file name and line number
 // if Llongfile or Lshortfile is set; a value of 1 will print the details
 // for the caller of Output.
-func Output(lvl Level, calldepth int, s string) error { return defaultLogger.Output(lvl, calldepth, s) }
+func Output(lvl Level, calldepth int, reqID, s string) error {
+	return defaultLogger.Output(lvl, calldepth, reqID, s)
+}
 
 // Cheap integer to fixed-width decimal ASCII. Give a negative width to avoid zero-padding.
 func itoa(buf *[]byte, i int, wid int) {

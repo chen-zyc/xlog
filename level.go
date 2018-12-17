@@ -41,25 +41,25 @@ func (level Level) String() string {
 	return "unknown"
 }
 
-// LogStr 返回适用于日志的字符串
+// LogStr 返回适用于日志的字符串。
 func (level Level) LogStr() string {
 	switch level {
 	case PrintLevel:
 		return ""
 	case DebugLevel:
-		return "[DEBUG]"
+		return "DEBU"
 	case InfoLevel:
-		return "[INFO ]"
+		return "INFO"
 	case WarnLevel:
-		return "[WARN ]"
+		return "WARN"
 	case ErrorLevel:
-		return "[ERROR]"
+		return "ERRO"
 	case FatalLevel:
-		return "[FATAL]"
+		return "FATA"
 	case PanicLevel:
-		return "[PANIC]"
+		return "PANI"
 	}
-	return "[UNKNO]"
+	return "UNKN"
 }
 
 // ParseLevel takes a string level and returns the Logrus log level constant.

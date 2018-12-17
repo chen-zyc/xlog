@@ -19,8 +19,9 @@ const (
 // Logger 日志接口。
 type Logger interface {
 	SetOptions(opts ...Option)
+	Level() Level
 
-	Output(lvl Level, calldepth int, s string) error
+	Output(lvl Level, calldepth int, reqID, s string) error
 
 	// Print 不受 Level 的影响，不管 Level 是什么总是能够打印出日志
 	Print(v ...interface{})
@@ -53,48 +54,87 @@ type Logger interface {
 }
 
 // Option 在创建 Logger 时可以指定参数
-type Option func(l *logger)
+type Option func(v interface{})
 
 // WriterOpt 设置输出。
 func WriterOpt(w io.Writer) Option {
-	return func(l *logger) {
-		l.mu.Lock()
-		defer l.mu.Unlock()
-		l.out = w
+	return func(v interface{}) {
+		if l, ok := v.(*logger); ok {
+			l.crwm.Lock()
+			defer l.crwm.Unlock()
+			l.out = w
+		}
 	}
 }
 
 // PrefixOpt 设置前缀。
 func PrefixOpt(p string) Option {
-	return func(l *logger) {
-		l.mu.Lock()
-		defer l.mu.Unlock()
-		l.prefix = p
+	return func(v interface{}) {
+		if l, ok := v.(*logger); ok {
+			l.crwm.Lock()
+			defer l.crwm.Unlock()
+			l.prefix = p
+		}
 	}
 }
 
 // FlagOpt 设置输出格式。
 func FlagOpt(flag int) Option {
-	return func(l *logger) {
-		l.mu.Lock()
-		defer l.mu.Unlock()
-		l.flag = flag
+	return func(v interface{}) {
+		if l, ok := v.(*logger); ok {
+			l.crwm.Lock()
+			defer l.crwm.Unlock()
+			l.flag = flag
+		}
 	}
 }
 
 // BaseCallDepthOpt 设置基础调用深度。
 func BaseCallDepthOpt(depth int) Option {
-	return func(l *logger) {
-		l.mu.Lock()
-		defer l.mu.Unlock()
-		l.baseCallDepth = depth
+	return func(v interface{}) {
+		if l, ok := v.(*logger); ok {
+			l.crwm.Lock()
+			defer l.crwm.Unlock()
+			l.baseCallDepth = depth
+		}
 	}
 }
 
 // LevelOpt 设置等级。
 func LevelOpt(lvl Level) Option {
-	return func(l *logger) {
-		l.level = lvl
+	return func(v interface{}) {
+		if l, ok := v.(*logger); ok {
+			l.crwm.Lock()
+			defer l.crwm.Unlock()
+			l.level = lvl
+		}
+	}
+}
+
+// LoggerOpt 设置 ReqLogger 的 Logger 字段。仅对 ReqLogger 有效。
+func LoggerOpt(l Logger) Option {
+	return func(v interface{}) {
+		if rl, ok := v.(*reqLogger); ok {
+			rl.Logger = l
+		}
+	}
+}
+
+// ReqIDOpt 设置 ReqLogger 的 request id。仅对 ReqLogger 有效。
+func ReqIDOpt(id string) Option {
+	return func(v interface{}) {
+		if rl, ok := v.(*reqLogger); ok {
+			rl.reqID = id
+		}
+	}
+}
+
+// ReqLevelOpt 设置 ReqLogger 的 level, 仅对 ReqLogger 有效。
+func ReqLevelOpt(lvl Level) Option {
+	return func(v interface{}) {
+		if rl, ok := v.(*reqLogger); ok {
+			rl.level = lvl
+		}
 	}
 }
 
