@@ -7,77 +7,77 @@ import (
 
 // Log Level
 const (
-	PrintLevel Level = iota
-	DebugLevel
-	InfoLevel
-	WarnLevel
-	ErrorLevel
-	FatalLevel
-	PanicLevel
+	LevelPrint Level = iota
+	LevelDebug
+	LevelInfo
+	LevelWarn
+	LevelError
+	LevelFatal
+	LevelPanic
 )
 
 // Level type
 type Level uint8
 
-// Convert the Level to a string. E.g. PanicLevel becomes "panic".
+// Convert the Level to a string.
 func (level Level) String() string {
 	switch level {
-	case PrintLevel:
+	case LevelPrint:
 		return "print"
-	case DebugLevel:
+	case LevelDebug:
 		return "debug"
-	case InfoLevel:
+	case LevelInfo:
 		return "info"
-	case WarnLevel:
+	case LevelWarn:
 		return "warning"
-	case ErrorLevel:
+	case LevelError:
 		return "error"
-	case FatalLevel:
+	case LevelFatal:
 		return "fatal"
-	case PanicLevel:
+	case LevelPanic:
 		return "panic"
 	}
 
 	return "unknown"
 }
 
-// LogStr 返回适用于日志的字符串。
+// LogStr returns the string that applices to the log.
 func (level Level) LogStr() string {
 	switch level {
-	case PrintLevel:
+	case LevelPrint:
 		return ""
-	case DebugLevel:
+	case LevelDebug:
 		return "[DEBU]"
-	case InfoLevel:
+	case LevelInfo:
 		return "[INFO]"
-	case WarnLevel:
+	case LevelWarn:
 		return "[WARN]"
-	case ErrorLevel:
+	case LevelError:
 		return "[ERRO]"
-	case FatalLevel:
+	case LevelFatal:
 		return "[FATA]"
-	case PanicLevel:
+	case LevelPanic:
 		return "[PANI]"
 	}
 	return "[UNKN]"
 }
 
-// Color 返回等级对应的颜色码。
+// Color returns the corresponding color.
 func (level Level) Color() string {
 	switch level {
-	case PrintLevel:
+	case LevelPrint:
 		return ColorPrint
-	case DebugLevel:
+	case LevelDebug:
 		return ColorDebug
-	case InfoLevel:
+	case LevelInfo:
 		return ColorInfo
-	case WarnLevel:
+	case LevelWarn:
 		return ColorWarn
-	case ErrorLevel:
+	case LevelError:
 		return ColorError
-	case FatalLevel:
+	case LevelFatal:
 		return ColorFatal
-	case PanicLevel:
+	case LevelPanic:
 		return ColorPanic
 	}
 	return ColorPrint
@@ -87,19 +87,19 @@ func (level Level) Color() string {
 func ParseLevel(lvl string) (Level, error) {
 	switch strings.ToLower(lvl) {
 	case "panic":
-		return PanicLevel, nil
+		return LevelPanic, nil
 	case "fatal":
-		return FatalLevel, nil
+		return LevelFatal, nil
 	case "error":
-		return ErrorLevel, nil
+		return LevelError, nil
 	case "warn", "warning":
-		return WarnLevel, nil
+		return LevelWarn, nil
 	case "info":
-		return InfoLevel, nil
+		return LevelInfo, nil
 	case "debug":
-		return DebugLevel, nil
+		return LevelDebug, nil
 	case "print":
-		return PrintLevel, nil
+		return LevelPrint, nil
 	}
 
 	var l Level

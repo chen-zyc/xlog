@@ -16,14 +16,16 @@ const (
 	LstdFlags     = Ldate | Ltime // initial values for the standard logger
 )
 
-// Logger 日志接口。
+// Logger can print log to writer.
+// You can new a Logger by calling `New()` or `NewWithWriter()`.
 type Logger interface {
-	SetOptions(opts ...Option)
-	Level() Level
-
+	// Output is the lowest level function.
 	Output(lvl Level, calldepth int, reqID, s string) error
 
-	// Print 不受 Level 的影响，不管 Level 是什么总是能够打印出日志
+	// return the copy of Config.
+	CopyConfig() Config
+
+	// Print is not affected by `Log Level`。 It will print the message regardless of `Log Level`.
 	Print(v ...interface{})
 	Printf(format string, v ...interface{})
 	Println(v ...interface{})
@@ -53,108 +55,15 @@ type Logger interface {
 	Panicln(v ...interface{})
 }
 
-// Option 在创建 Logger 时可以指定参数
-type Option func(v interface{})
-
-// WriterOpt 设置输出。
-func WriterOpt(w io.Writer) Option {
-	return func(v interface{}) {
-		if l, ok := v.(*logger); ok {
-			l.rwm.Lock()
-			defer l.rwm.Unlock()
-			l.out = w
-		}
-	}
+// New creates a new Logger with the specified config `c`.
+func New(c *Config) Logger {
+	return NewWithWriter(nil, c)
 }
 
-// PrefixOpt 设置前缀。
-func PrefixOpt(p string) Option {
-	return func(v interface{}) {
-		if l, ok := v.(*logger); ok {
-			l.rwm.Lock()
-			defer l.rwm.Unlock()
-			l.prefix = p
-		}
+// NewWithWriter creates a Logger with the specified writer `w`.
+func NewWithWriter(w io.Writer, c *Config) Logger {
+	if w == nil {
+		w = os.Stderr
 	}
-}
-
-// FlagOpt 设置输出格式。
-func FlagOpt(flag int) Option {
-	return func(v interface{}) {
-		if l, ok := v.(*logger); ok {
-			l.rwm.Lock()
-			defer l.rwm.Unlock()
-			l.flag = flag
-		}
-	}
-}
-
-// BaseCallDepthOpt 设置基础调用深度。
-func BaseCallDepthOpt(depth int) Option {
-	return func(v interface{}) {
-		if l, ok := v.(*logger); ok {
-			l.rwm.Lock()
-			defer l.rwm.Unlock()
-			l.baseCallDepth = depth
-		}
-	}
-}
-
-// LevelOpt 设置等级。
-func LevelOpt(lvl Level) Option {
-	return func(v interface{}) {
-		if l, ok := v.(*logger); ok {
-			l.rwm.Lock()
-			defer l.rwm.Unlock()
-			l.level = lvl
-		}
-	}
-}
-
-// ForceColorsOpt 设置是否开启颜色输出。
-func ForceColorsOpt(force bool) Option {
-	return func(v interface{}) {
-		if l, ok := v.(*logger); ok {
-			l.rwm.Lock()
-			defer l.rwm.Unlock()
-			l.forceColors = force
-		}
-	}
-}
-
-// LoggerOpt 设置 ReqLogger 的 Logger 字段。仅对 ReqLogger 有效。
-func LoggerOpt(l Logger) Option {
-	return func(v interface{}) {
-		if rl, ok := v.(*reqLogger); ok {
-			rl.Logger = l
-		}
-	}
-}
-
-// ReqIDOpt 设置 ReqLogger 的 request id。仅对 ReqLogger 有效。
-func ReqIDOpt(id string) Option {
-	return func(v interface{}) {
-		if rl, ok := v.(*reqLogger); ok {
-			rl.reqID = id
-		}
-	}
-}
-
-// ReqLevelOpt 设置 ReqLogger 的 level, 仅对 ReqLogger 有效。
-func ReqLevelOpt(lvl Level) Option {
-	return func(v interface{}) {
-		if rl, ok := v.(*reqLogger); ok {
-			rl.level = lvl
-		}
-	}
-}
-
-// New 根据 opts 指定的参数返回 Logger 的一个实现。
-func New(opts ...Option) Logger {
-	l := &logger{}
-	l.SetOptions(opts...)
-	if l.out == nil {
-		l.out = os.Stderr
-	}
-	return l
+	return newLogger(w, c)
 }

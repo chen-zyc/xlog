@@ -13,7 +13,7 @@ const (
 	Rdate         = `[0-9][0-9][0-9][0-9]/[0-9][0-9]/[0-9][0-9]`
 	Rtime         = `[0-9][0-9]:[0-9][0-9]:[0-9][0-9]`
 	Rmicroseconds = `\.[0-9][0-9][0-9][0-9][0-9][0-9]`
-	Rline         = `(88|90):` // must update if the calls to l.Printf / l.Print below move
+	Rline         = `(90|92):` // must update if the calls to l.Printf / l.Print below move
 	Rlongfile     = `.*/[A-Za-z0-9_\-]+\.go:` + Rline
 	Rshortfile    = `[A-Za-z0-9_\-]+\.go:` + Rline
 )
@@ -22,7 +22,7 @@ func TestCallDepth(t *testing.T) {
 	b := new(bytes.Buffer)
 
 	// 自定义 logger
-	l := New(WriterOpt(b), FlagOpt(Lshortfile))
+	l := NewWithWriter(b, &Config{Flag: Lshortfile})
 	l.Print("d1")
 	if !strings.Contains(b.String(), "26: d1") {
 		t.Fatal("calldepth not match: ", b.String())
@@ -30,9 +30,8 @@ func TestCallDepth(t *testing.T) {
 
 	// 默认 logger
 	b.Reset()
-	SetOptions(WriterOpt(b))
 	l.Print("d2")
-	if !strings.Contains(b.String(), "34: d2") {
+	if !strings.Contains(b.String(), "33: d2") {
 		t.Fatal("calldepth not match: ", b.String())
 	}
 
@@ -41,19 +40,19 @@ func TestCallDepth(t *testing.T) {
 	type A struct {
 		Logger
 	}
-	a := A{New(WriterOpt(b), FlagOpt(Lshortfile))}
+	a := A{NewWithWriter(b, &Config{Flag: Lshortfile})}
 	a.Print("d3")
-	if !strings.Contains(b.String(), "45: d3") {
+	if !strings.Contains(b.String(), "44: d3") {
 		t.Fatal("calldepth not match: ", b.String())
 	}
 
 	// 匿名函数封装，设置 calldepth = 1
 	b.Reset()
 	func() {
-		l := New(WriterOpt(b), FlagOpt(Lshortfile), BaseCallDepthOpt(1))
+		l := NewWithWriter(b, &Config{Flag: Lshortfile, BaseCalldepth: 1})
 		l.Print("d4")
 	}()
-	if !strings.Contains(b.String(), "55: d4") {
+	if !strings.Contains(b.String(), "54: d4") {
 		t.Fatal("calldepth not match: ", b.String())
 	}
 }
@@ -83,7 +82,10 @@ var tests = []tester{
 // Test using Println("hello", 23, "world") or using Printf("hello %d world", 23)
 func testPrint(t *testing.T, flag int, prefix string, pattern string, useFormat bool) {
 	buf := new(bytes.Buffer)
-	SetOptions(WriterOpt(buf), FlagOpt(flag), PrefixOpt(prefix))
+	conf := defaultLogger.CopyConfig()
+	conf.Flag = flag
+	conf.Prefix = prefix
+	ResetDefaultLogger(NewWithWriter(buf, &conf))
 	if useFormat {
 		Printf("hello %d world", 23)
 	} else {
@@ -111,50 +113,16 @@ func TestAll(t *testing.T) {
 func TestOutput(t *testing.T) {
 	const testString = "test"
 	var b bytes.Buffer
-	l := New(WriterOpt(&b))
+	l := NewWithWriter(&b, nil)
 	l.Println(testString)
 	if expect := testString + "\n"; b.String() != expect {
 		t.Errorf("log output should match %q is %q", expect, b.String())
 	}
 }
 
-func TestFlagAndPrefixSetting(t *testing.T) {
-	var b bytes.Buffer
-	l := New(WriterOpt(&b), PrefixOpt("Test:"), FlagOpt(LstdFlags))
-	f := l.(*logger).flag
-	if f != LstdFlags {
-		t.Errorf("Flags 1: expected %x got %x", LstdFlags, f)
-	}
-	l.SetOptions(FlagOpt(f | Lmicroseconds))
-	f = l.(*logger).flag
-	if f != LstdFlags|Lmicroseconds {
-		t.Errorf("Flags 2: expected %x got %x", LstdFlags|Lmicroseconds, f)
-	}
-	p := l.(*logger).prefix
-	if p != "Test:" {
-		t.Errorf(`Prefix: expected "Test:" got %q`, p)
-	}
-	l.SetOptions(PrefixOpt("Reality:"))
-	p = l.(*logger).prefix
-	if p != "Reality:" {
-		t.Errorf(`Prefix: expected "Reality:" got %q`, p)
-	}
-	// Verify a log message looks right, with our prefix and microseconds present.
-	l.Print("hello")
-	pattern := "^Reality:" + Rdate + " " + Rtime + Rmicroseconds + " hello\n"
-	matched, err := regexp.Match(pattern, b.Bytes())
-	if err != nil {
-		t.Fatalf("pattern %q did not compile: %s", pattern, err)
-	}
-	if !matched {
-		t.Error("message did not match pattern")
-	}
-}
-
 func TestUTCFlag(t *testing.T) {
 	var b bytes.Buffer
-	l := New(WriterOpt(&b), PrefixOpt("Test:"), FlagOpt(LstdFlags))
-	l.SetOptions(FlagOpt(Ldate | Ltime | LUTC))
+	l := NewWithWriter(&b, &Config{Prefix: "Test:", Flag: Ldate | Ltime | LUTC})
 	// Verify a log message looks right in the right time zone. Quantize to the second only.
 	now := time.Now().UTC()
 	l.Print("hello")
@@ -177,7 +145,7 @@ func TestUTCFlag(t *testing.T) {
 
 func TestEmptyPrintCreatesLine(t *testing.T) {
 	var b bytes.Buffer
-	l := New(WriterOpt(&b), PrefixOpt("Header:"), FlagOpt(LstdFlags))
+	l := NewWithWriter(&b, &Config{Prefix: "Header:", Flag: LstdFlags})
 	l.Print()
 	l.Println("non-empty")
 	output := b.String()
@@ -206,7 +174,7 @@ func BenchmarkItoa(b *testing.B) {
 func BenchmarkPrintln(b *testing.B) {
 	const testString = "test"
 	var buf bytes.Buffer
-	l := New(WriterOpt(&buf), FlagOpt(LstdFlags))
+	l := NewWithWriter(&buf, &Config{Flag: LstdFlags})
 	for i := 0; i < b.N; i++ {
 		buf.Reset()
 		l.Println(testString)
@@ -216,7 +184,7 @@ func BenchmarkPrintln(b *testing.B) {
 func BenchmarkPrintlnNoFlags(b *testing.B) {
 	const testString = "test"
 	var buf bytes.Buffer
-	l := New(WriterOpt(&buf))
+	l := NewWithWriter(&buf, nil)
 	for i := 0; i < b.N; i++ {
 		buf.Reset()
 		l.Println(testString)

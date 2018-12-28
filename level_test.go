@@ -13,18 +13,16 @@ func TestLogLevel(t *testing.T) {
 		osExit = os.Exit
 	}()
 
-	lvls := []Level{PrintLevel, DebugLevel, InfoLevel, WarnLevel, ErrorLevel, FatalLevel, PanicLevel}
+	lvls := []Level{LevelPrint, LevelDebug, LevelInfo, LevelWarn, LevelError, LevelFatal, LevelPanic}
 	info := []string{
-		PrintLevel.LogStr() + "P",
-		DebugLevel.LogStr() + "D",
-		InfoLevel.LogStr() + "I",
-		WarnLevel.LogStr() + "W",
-		ErrorLevel.LogStr() + "E",
-		FatalLevel.LogStr() + "F",
-		PanicLevel.LogStr() + "A",
+		LevelPrint.LogStr() + "P",
+		LevelDebug.LogStr() + "D",
+		LevelInfo.LogStr() + "I",
+		LevelWarn.LogStr() + "W",
+		LevelError.LogStr() + "E",
+		LevelFatal.LogStr() + "F",
+		LevelPanic.LogStr() + "A",
 	}
-	b := new(bytes.Buffer)
-	l := New(WriterOpt(b))
 
 	logFunc := []func(l Logger){
 		func(l Logger) {
@@ -78,7 +76,8 @@ func TestLogLevel(t *testing.T) {
 	}
 
 	for i, lvl := range lvls {
-		l.SetOptions(LevelOpt(lvl))
+		b := new(bytes.Buffer)
+		l := NewWithWriter(b, &Config{Level: lvl})
 
 		for j, f := range logFunc {
 			b.Reset()
@@ -94,6 +93,41 @@ func TestLogLevel(t *testing.T) {
 					strings.Replace(b.String(), "\n", " ", -1),
 					strings.Replace(want, "\n", " ", -1))
 			}
+		}
+	}
+}
+
+func TestParseLevel(t *testing.T) {
+	cases := []struct {
+		s      string
+		lvl    Level
+		hasErr bool
+	}{
+		{s: "print", lvl: LevelPrint},
+		{s: "debug", lvl: LevelDebug},
+		{s: "info", lvl: LevelInfo},
+		{s: "warn", lvl: LevelWarn},
+		{s: "warning", lvl: LevelWarn},
+		{s: "error", lvl: LevelError},
+		{s: "fatal", lvl: LevelFatal},
+		{s: "panic", lvl: LevelPanic},
+		{s: "", hasErr: true},
+		{s: "invalid", hasErr: true},
+	}
+
+	for _, c := range cases {
+		lvl, err := ParseLevel(c.s)
+		if c.hasErr {
+			if err == nil {
+				t.Fatalf("case: %#v", c)
+			}
+			continue
+		}
+		if err != nil {
+			t.Fatalf("don't want err, but got: %v", err)
+		}
+		if lvl != c.lvl {
+			t.Fatalf("unexpected level: %v, want: %v", lvl, c.lvl)
 		}
 	}
 }

@@ -9,83 +9,87 @@ import (
 	"time"
 )
 
-// 定义各级别的颜色
+// define the color of each level.
 var (
-	ColorPrint = "\x1b[0m"  // 无
-	ColorDebug = "\x1b[37m" // 灰
-	ColorInfo  = "\x1b[34m" // 蓝
-	ColorWarn  = "\x1b[33m" // 黄
-	ColorError = "\x1b[31m" // 红
-	ColorFatal = "\x1b[31m" // 红
-	ColorPanic = "\x1b[31m" // 红
+	ColorPrint = "\x1b[0m"  // none
+	ColorDebug = "\x1b[37m" // gray
+	ColorInfo  = "\x1b[34m" // blue
+	ColorWarn  = "\x1b[33m" // yellow
+	ColorError = "\x1b[31m" // red
+	ColorFatal = "\x1b[31m" // red
+	ColorPanic = "\x1b[31m" // red
 )
 
-// logger 是 Logger 接口的默认实现。
+// Config for Logger.
+type Config struct {
+	Prefix        string
+	Flag          int
+	BaseCalldepth int
+	Level         Level
+	ForceColors   bool
+	InitBufSize   int
+}
+
+// logger is the default implementation of the Logger interface.
 type logger struct {
-	rwm           sync.RWMutex
-	out           io.Writer
-	prefix        string // prefix 写在每行前面
-	flag          int    // 比如 LstdFlags
-	baseCallDepth int    // 基础的深度，实际调用 Caller 的深度等于该值加上 Output 的 calldepth 值。
-	level         Level
-	forceColors   bool // 强制输出颜色，默认是不输出。
-	buf           []byte
+	wmut    sync.Mutex
+	w       io.Writer
+	bufPool sync.Pool
+	Config
 }
 
-// 默认 Logger 实例.
-var defaultLogger = New(WriterOpt(os.Stderr), FlagOpt(LstdFlags), BaseCallDepthOpt(1))
-
-func (l *logger) SetOptions(opts ...Option) {
-	for _, opt := range opts {
-		if opt != nil {
-			opt(l)
-		}
+func newLogger(w io.Writer, c *Config) *logger {
+	if c == nil {
+		c = &Config{}
 	}
-}
-
-func (l *logger) Level() Level {
-	l.rwm.RLock()
-	defer l.rwm.RUnlock()
-	return l.level
+	if c.InitBufSize < 0 {
+		c.InitBufSize = 0
+	}
+	bufPool := sync.Pool{New: func() interface{} {
+		return make([]byte, 0, c.InitBufSize)
+	}}
+	return &logger{
+		w:       w,
+		bufPool: bufPool,
+		Config:  *c,
+	}
 }
 
 func (l *logger) Output(lvl Level, calldepth int, reqID, s string) error {
 	now := time.Now() // get this early.
 
-	// 获取打印日志的文件位置。
 	var file string
 	var line int
-
-	l.rwm.Lock()
-	defer l.rwm.Unlock()
-	if l.flag&(Lshortfile|Llongfile) != 0 {
-		calldepth += l.baseCallDepth
-		// Release lock while getting caller info - it's expensive.
-		l.rwm.Unlock()
+	if l.Flag&(Lshortfile|Llongfile) != 0 {
+		calldepth += l.BaseCalldepth
 		var ok bool
 		_, file, line, ok = runtime.Caller(calldepth)
 		if !ok {
 			file = "???"
 			line = 0
 		}
-		l.rwm.Lock()
 	}
 
-	l.buf = l.buf[:0]
-	// 颜色
-	if l.forceColors {
-		l.buf = append(l.buf, lvl.Color()...)
+	buf := l.bufPool.Get().([]byte)
+	buf = buf[:0]
+	// add color to header.
+	if l.ForceColors {
+		buf = append(buf, lvl.Color()...)
 	}
-	l.formatHeader(lvl, &l.buf, now, file, line, reqID)
-	if l.forceColors {
-		l.buf = append(l.buf, "\x1b[0m"...)
+	l.formatHeader(lvl, &buf, now, file, line, reqID)
+	// clear color.
+	if l.ForceColors {
+		buf = append(buf, "\x1b[0m"...)
 	}
-	l.buf = append(l.buf, s...)
-	// 如果没有添加换行符则在最后添加换行符。
+	buf = append(buf, s...)
+	// If there is no newline at the end, add it.
 	if len(s) == 0 || s[len(s)-1] != '\n' {
-		l.buf = append(l.buf, '\n')
+		buf = append(buf, '\n')
 	}
-	_, err := l.out.Write(l.buf)
+	l.wmut.Lock()
+	_, err := l.w.Write(buf)
+	l.wmut.Unlock()
+	l.bufPool.Put(buf)
 	return err
 }
 
@@ -96,12 +100,12 @@ func (l *logger) Output(lvl Level, calldepth int, reqID, s string) error {
 //   * reqID
 //   * file and line number (if corresponding flags are provided).
 func (l *logger) formatHeader(lvl Level, buf *[]byte, t time.Time, file string, line int, reqID string) {
-	*buf = append(*buf, l.prefix...)
-	if l.flag&(Ldate|Ltime|Lmicroseconds) != 0 {
-		if l.flag&LUTC != 0 {
+	*buf = append(*buf, l.Prefix...)
+	if l.Flag&(Ldate|Ltime|Lmicroseconds) != 0 {
+		if l.Flag&LUTC != 0 {
 			t = t.UTC()
 		}
-		if l.flag&Ldate != 0 {
+		if l.Flag&Ldate != 0 {
 			year, month, day := t.Date()
 			itoa(buf, year, 4)
 			*buf = append(*buf, '/')
@@ -110,14 +114,14 @@ func (l *logger) formatHeader(lvl Level, buf *[]byte, t time.Time, file string, 
 			itoa(buf, day, 2)
 			*buf = append(*buf, ' ')
 		}
-		if l.flag&(Ltime|Lmicroseconds) != 0 {
+		if l.Flag&(Ltime|Lmicroseconds) != 0 {
 			hour, min, sec := t.Clock()
 			itoa(buf, hour, 2)
 			*buf = append(*buf, ':')
 			itoa(buf, min, 2)
 			*buf = append(*buf, ':')
 			itoa(buf, sec, 2)
-			if l.flag&Lmicroseconds != 0 {
+			if l.Flag&Lmicroseconds != 0 {
 				*buf = append(*buf, '.')
 				itoa(buf, t.Nanosecond()/1e3, 6)
 			}
@@ -135,16 +139,9 @@ func (l *logger) formatHeader(lvl Level, buf *[]byte, t time.Time, file string, 
 		*buf = append(*buf, ']')
 	}
 
-	if l.flag&(Lshortfile|Llongfile) != 0 {
-		if l.flag&Lshortfile != 0 {
-			short := file
-			for i := len(file) - 1; i > 0; i-- {
-				if file[i] == '/' {
-					short = file[i+1:]
-					break
-				}
-			}
-			file = short
+	if l.Flag&(Lshortfile|Llongfile) != 0 {
+		if l.Flag&Lshortfile != 0 {
+			file = shortFile(file)
 		}
 		*buf = append(*buf, file...)
 		*buf = append(*buf, ':')
@@ -153,135 +150,163 @@ func (l *logger) formatHeader(lvl Level, buf *[]byte, t time.Time, file string, 
 	}
 }
 
-func (l *logger) Print(v ...interface{}) { l.Output(PrintLevel, 2, "", fmt.Sprint(v...)) }
-
-func (l *logger) Printf(format string, v ...interface{}) {
-	l.Output(PrintLevel, 2, "", fmt.Sprintf(format, v...))
+func shortFile(f string) string {
+	short := f
+	for i := len(f) - 1; i > 0; i-- {
+		if f[i] == '/' {
+			short = f[i+1:]
+			break
+		}
+	}
+	return short
 }
 
-func (l *logger) Println(v ...interface{}) { l.Output(PrintLevel, 2, "", fmt.Sprintln(v...)) }
+func (l *logger) CopyConfig() Config {
+	return l.Config
+}
+
+func (l *logger) Print(v ...interface{}) {
+	_ = l.Output(LevelPrint, 2, "", fmt.Sprint(v...))
+}
+
+func (l *logger) Printf(format string, v ...interface{}) {
+	_ = l.Output(LevelPrint, 2, "", fmt.Sprintf(format, v...))
+}
+
+func (l *logger) Println(v ...interface{}) {
+	_ = l.Output(LevelPrint, 2, "", fmt.Sprintln(v...))
+}
 
 func (l *logger) Debug(v ...interface{}) {
-	if l.level <= DebugLevel {
-		l.Output(DebugLevel, 2, "", fmt.Sprint(v...))
+	if l.Level <= LevelDebug {
+		_ = l.Output(LevelDebug, 2, "", fmt.Sprint(v...))
 	}
 }
 
 func (l *logger) Debugf(format string, v ...interface{}) {
-	if l.level <= DebugLevel {
-		l.Output(DebugLevel, 2, "", fmt.Sprintf(format, v...))
+	if l.Level <= LevelDebug {
+		_ = l.Output(LevelDebug, 2, "", fmt.Sprintf(format, v...))
 	}
 }
 
 func (l *logger) Debugln(v ...interface{}) {
-	if l.level <= DebugLevel {
-		l.Output(DebugLevel, 2, "", fmt.Sprintln(v...))
+	if l.Level <= LevelDebug {
+		_ = l.Output(LevelDebug, 2, "", fmt.Sprintln(v...))
 	}
 }
 
 func (l *logger) Info(v ...interface{}) {
-	if l.level <= InfoLevel {
-		l.Output(InfoLevel, 2, "", fmt.Sprint(v...))
+	if l.Level <= LevelInfo {
+		_ = l.Output(LevelInfo, 2, "", fmt.Sprint(v...))
 	}
 }
 
 func (l *logger) Infof(format string, v ...interface{}) {
-	if l.level <= InfoLevel {
-		l.Output(InfoLevel, 2, "", fmt.Sprintf(format, v...))
+	if l.Level <= LevelInfo {
+		_ = l.Output(LevelInfo, 2, "", fmt.Sprintf(format, v...))
 	}
 }
 
 func (l *logger) Infoln(v ...interface{}) {
-	if l.level <= InfoLevel {
-		l.Output(InfoLevel, 2, "", fmt.Sprintln(v...))
+	if l.Level <= LevelInfo {
+		_ = l.Output(LevelInfo, 2, "", fmt.Sprintln(v...))
 	}
 }
 
 func (l *logger) Warn(v ...interface{}) {
-	if l.level <= WarnLevel {
-		l.Output(WarnLevel, 2, "", fmt.Sprint(v...))
+	if l.Level <= LevelWarn {
+		_ = l.Output(LevelWarn, 2, "", fmt.Sprint(v...))
 	}
 }
 
 func (l *logger) Warnf(format string, v ...interface{}) {
-	if l.level <= WarnLevel {
-		l.Output(WarnLevel, 2, "", fmt.Sprintf(format, v...))
+	if l.Level <= LevelWarn {
+		_ = l.Output(LevelWarn, 2, "", fmt.Sprintf(format, v...))
 	}
 }
 
 func (l *logger) Warnln(v ...interface{}) {
-	if l.level <= WarnLevel {
-		l.Output(WarnLevel, 2, "", fmt.Sprintln(v...))
+	if l.Level <= LevelWarn {
+		_ = l.Output(LevelWarn, 2, "", fmt.Sprintln(v...))
 	}
 }
 
 func (l *logger) Error(v ...interface{}) {
-	if l.level <= ErrorLevel {
-		l.Output(ErrorLevel, 2, "", fmt.Sprint(v...))
+	if l.Level <= LevelError {
+		_ = l.Output(LevelError, 2, "", fmt.Sprint(v...))
 	}
 }
 
 func (l *logger) Errorf(format string, v ...interface{}) {
-	if l.level <= ErrorLevel {
-		l.Output(ErrorLevel, 2, "", fmt.Sprintf(format, v...))
+	if l.Level <= LevelError {
+		_ = l.Output(LevelError, 2, "", fmt.Sprintf(format, v...))
 	}
 }
 
 func (l *logger) Errorln(v ...interface{}) {
-	if l.level <= ErrorLevel {
-		l.Output(ErrorLevel, 2, "", fmt.Sprintln(v...))
+	if l.Level <= LevelError {
+		_ = l.Output(LevelError, 2, "", fmt.Sprintln(v...))
 	}
 }
 
 var osExit = os.Exit // for testing
 
 func (l *logger) Fatal(v ...interface{}) {
-	if l.level <= FatalLevel {
-		l.Output(FatalLevel, 2, "", fmt.Sprint(v...))
+	if l.Level <= LevelFatal {
+		_ = l.Output(LevelFatal, 2, "", fmt.Sprint(v...))
 		osExit(1)
 	}
 }
 
 func (l *logger) Fatalf(format string, v ...interface{}) {
-	if l.level <= FatalLevel {
-		l.Output(FatalLevel, 2, "", fmt.Sprintf(format, v...))
+	if l.Level <= LevelFatal {
+		_ = l.Output(LevelFatal, 2, "", fmt.Sprintf(format, v...))
 		osExit(1)
 	}
 }
 
 func (l *logger) Fatalln(v ...interface{}) {
-	if l.level <= FatalLevel {
-		l.Output(FatalLevel, 2, "", fmt.Sprintln(v...))
+	if l.Level <= LevelFatal {
+		_ = l.Output(LevelFatal, 2, "", fmt.Sprintln(v...))
 		osExit(1)
 	}
 }
 
 func (l *logger) Panic(v ...interface{}) {
-	if l.level <= PanicLevel {
+	if l.Level <= LevelPanic {
 		s := fmt.Sprint(v...)
-		l.Output(PanicLevel, 2, "", s)
+		_ = l.Output(LevelPanic, 2, "", s)
 		panic(s)
 	}
 }
 
 func (l *logger) Panicf(format string, v ...interface{}) {
-	if l.level <= PanicLevel {
+	if l.Level <= LevelPanic {
 		s := fmt.Sprintf(format, v...)
-		l.Output(PanicLevel, 2, "", s)
+		_ = l.Output(LevelPanic, 2, "", s)
 		panic(s)
 	}
 }
 
 func (l *logger) Panicln(v ...interface{}) {
-	if l.level <= PanicLevel {
+	if l.Level <= LevelPanic {
 		s := fmt.Sprintln(v...)
-		l.Output(PanicLevel, 2, "", s)
+		_ = l.Output(LevelPanic, 2, "", s)
 		panic(s)
 	}
 }
 
-// SetOptions 设置默认实现的选项。
-func SetOptions(opts ...Option) { defaultLogger.SetOptions(opts...) }
+var defaultLogger = New(&Config{Level: LevelError, Flag: LstdFlags, BaseCalldepth: 1})
+
+// ResetDefaultLogger replace defaultLogger with `l`.
+// NOTE:
+//  1. The BaseCalldepth need one more than l.
+//  2. This function is not thread safe.
+func ResetDefaultLogger(l Logger) {
+	if l != nil {
+		defaultLogger = l
+	}
+}
 
 // Print calls Output to print to the default logger.
 // Arguments are handled in the manner of fmt.Print.
